@@ -42,7 +42,7 @@
 # define ASAN_INTERCEPT_PTHREAD_CREATE 0
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 # define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 1
 #else
 # define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 0

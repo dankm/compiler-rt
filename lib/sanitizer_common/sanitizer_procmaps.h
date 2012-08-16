@@ -61,7 +61,7 @@ class ProcessMaps {
     return false;
   }
 
-#if defined __linux__
+#if defined (__linux__) || defined (__FreeBSD__)
   char *proc_self_maps_buff_;
   uptr proc_self_maps_buff_mmaped_size_;
   uptr proc_self_maps_buff_len_;

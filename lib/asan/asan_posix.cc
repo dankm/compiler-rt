@@ -11,7 +11,7 @@
 //
 // Posix-specific details.
 //===----------------------------------------------------------------------===//
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
 
 #include "asan_internal.h"
 #include "asan_interceptors.h"
@@ -66,7 +66,7 @@ void SetAlternateSignalStack() {
   // future. It is not required by man 2 sigaltstack now (they're using
   // malloc()).
   void* base = MmapOrDie(kAltStackSize, __FUNCTION__);
-  altstack.ss_sp = base;
+  altstack.ss_sp = (char *)base;
   altstack.ss_flags = 0;
   altstack.ss_size = kAltStackSize;
   CHECK(0 == sigaltstack(&altstack, 0));

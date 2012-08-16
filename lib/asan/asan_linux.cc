@@ -11,7 +11,7 @@
 //
 // Linux-specific details.
 //===----------------------------------------------------------------------===//
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 
 #include "asan_interceptors.h"
 #include "asan_internal.h"
@@ -45,6 +45,7 @@ void *AsanDoesNotSupportStaticLinkage() {
   return &_DYNAMIC;  // defined in link.h
 }
 
+#ifdef __linux__
 void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
 #ifdef ANDROID
   *pc = *sp = *bp = 0;
@@ -67,6 +68,30 @@ void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
 # error "Unsupported arch"
 #endif
 }
+#endif // __linux__
+
+#ifdef __FreeBSD__
+void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
+#if defined(__arm__)
+  ucontext_t *ucontext = (ucontext_t*)context;
+  *pc = ucontext->uc_mcontext.__gregs[_REG_PC];
+  *bp = ucontext->uc_mcontext.__gregs[_REG_FP];
+  *sp = ucontext->uc_mcontext.__gregs[_REG_SP];
+# elif defined(__x86_64__)
+  ucontext_t *ucontext = (ucontext_t*)context;
+  *pc = ucontext->uc_mcontext.mc_rip;
+  *bp = ucontext->uc_mcontext.mc_rbp;
+  *sp = ucontext->uc_mcontext.mc_rsp;
+# elif defined(__i386__)
+  ucontext_t *ucontext = (ucontext_t*)context;
+  *pc = ucontext->uc_mcontext.mc_eip;
+  *bp = ucontext->uc_mcontext.mc_ebp;
+  *sp = ucontext->uc_mcontext.mc_esp;
+#else
+# error "Unsupported arch"
+#endif
+}
+#endif // __FreeBSD
 
 bool AsanInterceptsSignal(int signum) {
   return signum == SIGSEGV && flags()->handle_segv;

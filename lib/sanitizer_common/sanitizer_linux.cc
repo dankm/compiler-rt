@@ -11,7 +11,7 @@
 // run-time libraries and implements linux-specific functions from
 // sanitizer_libc.h.
 //===----------------------------------------------------------------------===//
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
@@ -24,6 +24,9 @@
 #include <fcntl.h>
 #include <link.h>
 #include <pthread.h>
+#ifdef __FreeBSD__
+#include <pthread_np.h>
+#endif
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -38,53 +41,57 @@ namespace __sanitizer {
 // --------------- sanitizer_libc.h
 void *internal_mmap(void *addr, uptr length, int prot, int flags,
                     int fd, u64 offset) {
+#ifdef __linux__
 #if __WORDSIZE == 64
   return (void *)syscall(__NR_mmap, addr, length, prot, flags, fd, offset);
 #else
   return (void *)syscall(__NR_mmap2, addr, length, prot, flags, fd, offset);
-#endif
+#endif // __WORDSIZE
+#else // __linux__
+  return (void *)syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+#endif // __linux__
 }
 
 int internal_munmap(void *addr, uptr length) {
-  return syscall(__NR_munmap, addr, length);
+  return syscall(SYS_munmap, addr, length);
 }
 
 int internal_close(fd_t fd) {
-  return syscall(__NR_close, fd);
+  return syscall(SYS_close, fd);
 }
 
 fd_t internal_open(const char *filename, bool write) {
-  return syscall(__NR_open, filename,
+  return syscall(SYS_open, filename,
       write ? O_WRONLY | O_CREAT /*| O_CLOEXEC*/ : O_RDONLY, 0660);
 }
 
 uptr internal_read(fd_t fd, void *buf, uptr count) {
-  return (uptr)syscall(__NR_read, fd, buf, count);
+  return (uptr)syscall(SYS_read, fd, buf, count);
 }
 
 uptr internal_write(fd_t fd, const void *buf, uptr count) {
-  return (uptr)syscall(__NR_write, fd, buf, count);
+  return (uptr)syscall(SYS_write, fd, buf, count);
 }
 
 uptr internal_filesize(fd_t fd) {
-#if __WORDSIZE == 64
+#if (__WORDSIZE == 64) || defined (__FreeBSD__)
   struct stat st;
-  if (syscall(__NR_fstat, fd, &st))
+  if (syscall(SYS_fstat, fd, &st))
     return -1;
 #else
   struct stat64 st;
-  if (syscall(__NR_fstat64, fd, &st))
+  if (syscall(SYS_fstat64, fd, &st))
     return -1;
 #endif
   return (uptr)st.st_size;
 }
 
 int internal_dup2(int oldfd, int newfd) {
-  return syscall(__NR_dup2, oldfd, newfd);
+  return syscall(SYS_dup2, oldfd, newfd);
 }
 
 int internal_sched_yield() {
-  return syscall(__NR_sched_yield);
+  return syscall(SYS_sched_yield);
 }
 
 // ----------------- sanitizer_common.h
@@ -124,7 +131,11 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
     return;
   }
   pthread_attr_t attr;
+#ifdef __linux__
   CHECK_EQ(pthread_getattr_np(pthread_self(), &attr), 0);
+#elif defined(__FreeBSD__)
+  CHECK_EQ(pthread_attr_get_np(pthread_self(), &attr), 0);
+#endif
   uptr stacksize = 0;
   void *stackaddr = 0;
   pthread_attr_getstack(&attr, &stackaddr, (size_t*)&stacksize);
@@ -164,9 +175,11 @@ const char *GetEnv(const char *name) {
 }
 
 // ------------------ sanitizer_symbolizer.h
+#ifdef __linux__
 typedef ElfW(Ehdr) Elf_Ehdr;
 typedef ElfW(Shdr) Elf_Shdr;
 typedef ElfW(Phdr) Elf_Phdr;
+#endif // __linux__
 
 bool FindDWARFSection(uptr object_file_addr, const char *section_name,
                       DWARFSection *section) {

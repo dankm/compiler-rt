@@ -11,7 +11,7 @@
 // run-time libraries and implements POSIX-specific functions from
 // sanitizer_libc.h.
 //===----------------------------------------------------------------------===//
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
 
 #include "sanitizer_common.h"
 #include "sanitizer_libc.h"
