@@ -48,6 +48,7 @@ void Die() {
   Exit(flags()->exitcode);
 }
 
+SANITIZER_INTERFACE_ATTRIBUTE
 void CheckFailed(const char *file, int line, const char *cond, u64 v1, u64 v2) {
   AsanReport("AddressSanitizer CHECK failed: %s:%d \"%s\" (0x%zx, 0x%zx)\n",
              file, line, cond, (uptr)v1, (uptr)v2);
@@ -101,7 +102,9 @@ static void ParseFlagsFromString(Flags *f, const char *str) {
 }
 
 extern "C" {
-const char* WEAK __asan_default_options() { return ""; }
+SANITIZER_WEAK_ATTRIBUTE
+SANITIZER_INTERFACE_ATTRIBUTE
+const char* __asan_default_options() { return ""; }
 }  // extern "C"
 
 void InitializeFlags(Flags *f, const char *env) {
@@ -242,6 +245,7 @@ static NOINLINE void force_interface_symbols() {
     case 28: __asan_stack_free(0, 0, 0); break;
     case 29: __asan_stack_malloc(0, 0); break;
     case 30: __asan_set_on_error_callback(0); break;
+    case 31: __asan_default_options(); break;
   }
 }
 

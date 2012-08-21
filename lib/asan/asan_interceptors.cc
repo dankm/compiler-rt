@@ -14,6 +14,7 @@
 #include "asan_interceptors.h"
 
 #include "asan_allocator.h"
+#include "asan_intercepted_functions.h"
 #include "asan_interface.h"
 #include "asan_internal.h"
 #include "asan_mapping.h"
@@ -23,127 +24,6 @@
 #include "asan_thread_registry.h"
 #include "interception/interception.h"
 #include "sanitizer_common/sanitizer_libc.h"
-
-// Use macro to describe if specific function should be
-// intercepted on a given platform.
-#if !defined(_WIN32)
-# define ASAN_INTERCEPT_ATOLL_AND_STRTOLL 1
-# define ASAN_INTERCEPT__LONGJMP 1
-# define ASAN_INTERCEPT_STRDUP 1
-# define ASAN_INTERCEPT_STRCASECMP_AND_STRNCASECMP 1
-# define ASAN_INTERCEPT_INDEX 1
-# define ASAN_INTERCEPT_PTHREAD_CREATE 1
-#else
-# define ASAN_INTERCEPT_ATOLL_AND_STRTOLL 0
-# define ASAN_INTERCEPT__LONGJMP 0
-# define ASAN_INTERCEPT_STRDUP 0
-# define ASAN_INTERCEPT_STRCASECMP_AND_STRNCASECMP 0
-# define ASAN_INTERCEPT_INDEX 0
-# define ASAN_INTERCEPT_PTHREAD_CREATE 0
-#endif
-
-#if defined(__linux__) || defined(__FreeBSD__)
-# define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 1
-#else
-# define ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX 0
-#endif
-
-#if !defined(__APPLE__)
-# define ASAN_INTERCEPT_STRNLEN 1
-#else
-# define ASAN_INTERCEPT_STRNLEN 0
-#endif
-
-#if !defined(ANDROID) && !defined(_WIN32)
-# define ASAN_INTERCEPT_SIGNAL_AND_SIGACTION 1
-#else
-# define ASAN_INTERCEPT_SIGNAL_AND_SIGACTION 0
-#endif
-
-// On Darwin siglongjmp tailcalls longjmp, so we don't want to intercept it
-// there.
-#if !defined(_WIN32) && !defined(__APPLE__)
-# define ASAN_INTERCEPT_SIGLONGJMP 1
-#else
-# define ASAN_INTERCEPT_SIGLONGJMP 0
-#endif
-
-#if ASAN_HAS_EXCEPTIONS && !defined(_WIN32)
-# define ASAN_INTERCEPT___CXA_THROW 1
-#else
-# define ASAN_INTERCEPT___CXA_THROW 0
-#endif
-
-// Use extern declarations of intercepted functions on Mac and Windows
-// to avoid including system headers.
-#if defined(__APPLE__) || (defined(_WIN32) && !defined(_DLL))
-extern "C" {
-// signal.h
-# if ASAN_INTERCEPT_SIGNAL_AND_SIGACTION
-struct sigaction;
-int sigaction(int sig, const struct sigaction *act,
-              struct sigaction *oldact);
-void *signal(int signum, void *handler);
-# endif
-
-// setjmp.h
-void longjmp(void* env, int value);
-# if ASAN_INTERCEPT__LONGJMP
-void _longjmp(void *env, int value);
-# endif
-# if ASAN_INTERCEPT___CXA_THROW
-void __cxa_throw(void *a, void *b, void *c);
-#endif
-
-// string.h / strings.h
-int memcmp(const void *a1, const void *a2, uptr size);
-void* memmove(void *to, const void *from, uptr size);
-void* memcpy(void *to, const void *from, uptr size);
-void* memset(void *block, int c, uptr size);
-char* strchr(const char *str, int c);
-char* strcat(char *to, const char* from);  // NOLINT
-char *strncat(char *to, const char* from, uptr size);
-char* strcpy(char *to, const char* from);  // NOLINT
-char* strncpy(char *to, const char* from, uptr size);
-int strcmp(const char *s1, const char* s2);
-int strncmp(const char *s1, const char* s2, uptr size);
-uptr strlen(const char *s);
-# if ASAN_INTERCEPT_STRCASECMP_AND_STRNCASECMP
-int strcasecmp(const char *s1, const char *s2);
-int strncasecmp(const char *s1, const char *s2, uptr n);
-# endif
-# if ASAN_INTERCEPT_STRDUP
-char* strdup(const char *s);
-# endif
-# if ASAN_INTERCEPT_STRNLEN
-uptr strnlen(const char *s, uptr maxlen);
-# endif
-# if ASAN_INTERCEPT_INDEX
-char* index(const char *string, int c);
-# endif
-
-// stdlib.h
-int atoi(const char *nptr);
-long atol(const char *nptr);  // NOLINT
-long strtol(const char *nptr, char **endptr, int base);  // NOLINT
-# if ASAN_INTERCEPT_ATOLL_AND_STRTOLL
-long long atoll(const char *nptr);  // NOLINT
-long long strtoll(const char *nptr, char **endptr, int base);  // NOLINT
-# endif
-
-// Windows threads.
-# if defined(_WIN32)
-__declspec(dllimport)
-void* __stdcall CreateThread(void *sec, uptr st, void* start,
-                             void *arg, DWORD fl, DWORD *id);
-# endif
-// Posix threads.
-# if ASAN_INTERCEPT_PTHREAD_CREATE
-int pthread_create(void *thread, void *attr, void *(*start_routine)(void*),
-                   void *arg);
-# endif
-}  // extern "C"
-#endif
 
 namespace __asan {
 
@@ -294,26 +174,22 @@ static void MlockIsUnsupported() {
 }
 
 extern "C" {
-INTERCEPTOR_ATTRIBUTE
-int mlock(const void *addr, uptr len) {
+INTERCEPTOR(int, mlock, const void *addr, uptr len) {
   MlockIsUnsupported();
   return 0;
 }
 
-INTERCEPTOR_ATTRIBUTE
-int munlock(const void *addr, uptr len) {
+INTERCEPTOR(int, munlock, const void *addr, uptr len) {
   MlockIsUnsupported();
   return 0;
 }
 
-INTERCEPTOR_ATTRIBUTE
-int mlockall(int flags) {
+INTERCEPTOR(int, mlockall, int flags) {
   MlockIsUnsupported();
   return 0;
 }
 
-INTERCEPTOR_ATTRIBUTE
-int munlockall(void) {
+INTERCEPTOR(int, munlockall, void) {
   MlockIsUnsupported();
   return 0;
 }
@@ -330,6 +206,9 @@ static inline int CharCaseCmp(unsigned char c1, unsigned char c2) {
 }
 
 INTERCEPTOR(int, memcmp, const void *a1, const void *a2, uptr size) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(memcmp)(a1, a2, size);
+#endif
   ENSURE_ASAN_INITED();
   unsigned char c1 = 0, c2 = 0;
   const unsigned char *s1 = (const unsigned char*)a1;
@@ -389,6 +268,9 @@ INTERCEPTOR(void*, memset, void *block, int c, uptr size) {
 }
 
 INTERCEPTOR(char*, strchr, const char *str, int c) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strchr)(str, c);
+#endif
   ENSURE_ASAN_INITED();
   char *result = REAL(strchr)(str, c);
   if (flags()->replace_str) {
@@ -446,6 +328,9 @@ INTERCEPTOR(char*, strncat, char *to, const char *from, uptr size) {
 }
 
 INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strcmp)(s1, s2);
+#endif
   if (asan_init_is_running) {
     return REAL(strcmp)(s1, s2);
   }
@@ -463,6 +348,9 @@ INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
 }
 
 INTERCEPTOR(char*, strcpy, char *to, const char *from) {  // NOLINT
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strcpy)(to, from);  // NOLINT
+#endif
   // strcpy is called from malloc_default_purgeable_zone()
   // in __asan::ReplaceSystemAlloc() on Mac.
   if (asan_init_is_running) {
@@ -480,6 +368,9 @@ INTERCEPTOR(char*, strcpy, char *to, const char *from) {  // NOLINT
 
 #if ASAN_INTERCEPT_STRDUP
 INTERCEPTOR(char*, strdup, const char *s) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strdup)(s);
+#endif
   ENSURE_ASAN_INITED();
   if (flags()->replace_str) {
     uptr length = REAL(strlen)(s);
@@ -490,6 +381,9 @@ INTERCEPTOR(char*, strdup, const char *s) {
 #endif
 
 INTERCEPTOR(uptr, strlen, const char *s) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strlen)(s);
+#endif
   // strlen is called from malloc_default_purgeable_zone()
   // in __asan::ReplaceSystemAlloc() on Mac.
   if (asan_init_is_running) {
@@ -534,6 +428,9 @@ INTERCEPTOR(int, strncasecmp, const char *s1, const char *s2, uptr n) {
 #endif  // ASAN_INTERCEPT_STRCASECMP_AND_STRNCASECMP
 
 INTERCEPTOR(int, strncmp, const char *s1, const char *s2, uptr size) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(strncmp)(s1, s2, size);
+#endif
   // strncmp is called from malloc_default_purgeable_zone()
   // in __asan::ReplaceSystemAlloc() on Mac.
   if (asan_init_is_running) {
@@ -610,6 +507,9 @@ INTERCEPTOR(long, strtol, const char *nptr,  // NOLINT
 }
 
 INTERCEPTOR(int, atoi, const char *nptr) {
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(atoi)(nptr);
+#endif
   ENSURE_ASAN_INITED();
   if (!flags()->replace_str) {
     return REAL(atoi)(nptr);
@@ -626,6 +526,9 @@ INTERCEPTOR(int, atoi, const char *nptr) {
 }
 
 INTERCEPTOR(long, atol, const char *nptr) {  // NOLINT
+#if MAC_INTERPOSE_FUNCTIONS
+  if (!asan_inited) return REAL(atol)(nptr);
+#endif
   ENSURE_ASAN_INITED();
   if (!flags()->replace_str) {
     return REAL(atol)(nptr);
@@ -704,6 +607,9 @@ void InitializeAsanInterceptors() {
   static bool was_called_once;
   CHECK(was_called_once == false);
   was_called_once = true;
+#if MAC_INTERPOSE_FUNCTIONS
+  return;
+#endif
   // Intercept mem* functions.
   ASAN_INTERCEPT_FUNC(memcmp);
   ASAN_INTERCEPT_FUNC(memmove);
@@ -711,7 +617,11 @@ void InitializeAsanInterceptors() {
   if (PLATFORM_HAS_DIFFERENT_MEMCPY_AND_MEMMOVE) {
     ASAN_INTERCEPT_FUNC(memcpy);
   } else {
-    REAL(memcpy) = REAL(memmove);
+#if !MAC_INTERPOSE_FUNCTIONS
+    // If we're using dynamic interceptors on Mac, these two are just plain
+    // functions.
+    *(uptr*)&REAL(memcpy) = (uptr)REAL(memmove);
+#endif
   }
 
   // Intercept str* functions.
@@ -747,6 +657,14 @@ void InitializeAsanInterceptors() {
 #if ASAN_INTERCEPT_ATOLL_AND_STRTOLL
   ASAN_INTERCEPT_FUNC(atoll);
   ASAN_INTERCEPT_FUNC(strtoll);
+#endif
+
+#if ASAN_INTERCEPT_MLOCKX
+  // Intercept mlock/munlock.
+  ASAN_INTERCEPT_FUNC(mlock);
+  ASAN_INTERCEPT_FUNC(munlock);
+  ASAN_INTERCEPT_FUNC(mlockall);
+  ASAN_INTERCEPT_FUNC(munlockall);
 #endif
 
   // Intecept signal- and jump-related functions.
