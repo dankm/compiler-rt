@@ -97,7 +97,6 @@ static int FindFirstDSOCallback(struct dl_phdr_info *info, size_t size,
   // The dl_iterate_phdr from FreeBSD iterates over all ELF objects,
   // not only the shared objects. So we skip everything else which has
   // not a PT_LOAD type.
-  Report("ptype:  %d name: %s\n",info->dlpi_phdr->p_type, info->dlpi_name);
   if (info->dlpi_phdr->p_type != PT_LOAD)
 	  return 0;
 
@@ -130,7 +129,6 @@ void AsanCheckDynamicRTPrereqs() {
     Report("ASan runtime does not come first in initial library list; "
            "you should either link runtime to your application or "
            "manually preload it with LD_PRELOAD.\n");
-	Report("dso_name: %s\n", first_dso_name);
     Die();
   }
 }
