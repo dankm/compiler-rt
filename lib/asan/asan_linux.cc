@@ -94,7 +94,9 @@ static int FindFirstDSOCallback(struct dl_phdr_info *info, size_t size,
   if (!info->dlpi_name || info->dlpi_name[0] == 0)
     return 0;
 
-  // Ignore any non-loadable segments (ie: ourself)
+  // The dl_iterate_phdr from FreeBSD iterates over all ELF objects,
+  // not only the shared objects. So we skip everything else which has
+  // not a PT_LOAD type.
   Report("ptype:  %d name: %s\n",info->dlpi_phdr->p_type, info->dlpi_name);
   if (info->dlpi_phdr->p_type != PT_LOAD)
 	  return 0;
