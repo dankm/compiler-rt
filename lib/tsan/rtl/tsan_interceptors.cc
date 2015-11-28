@@ -124,7 +124,7 @@ const int SIGFPE = 8;
 const int SIGSEGV = 11;
 const int SIGPIPE = 13;
 const int SIGTERM = 15;
-#ifdef __mips__
+#if defined(__mips__) || SANITIZER_MAC
 const int SIGBUS = 10;
 const int SIGSYS = 12;
 #else
@@ -233,7 +233,9 @@ static ThreadSignalContext *SigCtx(ThreadState *thr) {
   return ctx;
 }
 
+#if !SANITIZER_MAC
 static unsigned g_thread_finalize_key;
+#endif
 
 ScopedInterceptor::ScopedInterceptor(ThreadState *thr, const char *fname,
                                      uptr pc)
@@ -264,17 +266,6 @@ ScopedInterceptor::~ScopedInterceptor() {
   }
 }
 
-#define SCOPED_TSAN_INTERCEPTOR(func, ...) \
-    SCOPED_INTERCEPTOR_RAW(func, __VA_ARGS__); \
-    if (REAL(func) == 0) { \
-      Report("FATAL: ThreadSanitizer: failed to intercept %s\n", #func); \
-      Die(); \
-    }                                                    \
-    if (thr->ignore_interceptors || thr->in_ignored_lib) \
-      return REAL(func)(__VA_ARGS__); \
-/**/
-
-#define TSAN_INTERCEPTOR(ret, func, ...) INTERCEPTOR(ret, func, __VA_ARGS__)
 #define TSAN_INTERCEPT(func) INTERCEPT_FUNCTION(func)
 #if SANITIZER_FREEBSD
 # define TSAN_INTERCEPT_VER(func, ver) INTERCEPT_FUNCTION(func)
@@ -795,8 +786,25 @@ TSAN_INTERCEPTOR(int, posix_memalign, void **memptr, uptr align, uptr sz) {
 }
 #endif
 
+// __cxa_guard_acquire and friends need to be intercepted in a special way -
+// regular interceptors will break statically-linked libstdc++. Linux
+// interceptors are especially defined as weak functions (so that they don't
+// cause link errors when user defines them as well). So they silently
+// auto-disable themselves when such symbol is already present in the binary. If
+// we link libstdc++ statically, it will bring own __cxa_guard_acquire which
+// will silently replace our interceptor.  That's why on Linux we simply export
+// these interceptors with INTERFACE_ATTRIBUTE.
+// On OS X, we don't support statically linking, so we just use a regular
+// interceptor.
+#if SANITIZER_MAC
+#define STDCXX_INTERCEPTOR TSAN_INTERCEPTOR
+#else
+#define STDCXX_INTERCEPTOR(rettype, name, ...) \
+  extern "C" rettype INTERFACE_ATTRIBUTE name(__VA_ARGS__)
+#endif
+
 // Used in thread-safe function static initialization.
-extern "C" int INTERFACE_ATTRIBUTE __cxa_guard_acquire(atomic_uint32_t *g) {
+STDCXX_INTERCEPTOR(int, __cxa_guard_acquire, atomic_uint32_t *g) {
   SCOPED_INTERCEPTOR_RAW(__cxa_guard_acquire, g);
   for (;;) {
     u32 cmp = atomic_load(g, memory_order_acquire);
@@ -812,13 +820,13 @@ extern "C" int INTERFACE_ATTRIBUTE __cxa_guard_acquire(atomic_uint32_t *g) {
   }
 }
 
-extern "C" void INTERFACE_ATTRIBUTE __cxa_guard_release(atomic_uint32_t *g) {
+STDCXX_INTERCEPTOR(void, __cxa_guard_release, atomic_uint32_t *g) {
   SCOPED_INTERCEPTOR_RAW(__cxa_guard_release, g);
   Release(thr, pc, (uptr)g);
   atomic_store(g, 1, memory_order_release);
 }
 
-extern "C" void INTERFACE_ATTRIBUTE __cxa_guard_abort(atomic_uint32_t *g) {
+STDCXX_INTERCEPTOR(void, __cxa_guard_abort, atomic_uint32_t *g) {
   SCOPED_INTERCEPTOR_RAW(__cxa_guard_abort, g);
   atomic_store(g, 0, memory_order_relaxed);
 }
@@ -836,6 +844,7 @@ void DestroyThreadState() {
 }
 }  // namespace __tsan
 
+#if !SANITIZER_MAC
 static void thread_finalize(void *v) {
   uptr iter = (uptr)v;
   if (iter > 1) {
@@ -847,6 +856,7 @@ static void thread_finalize(void *v) {
   }
   DestroyThreadState();
 }
+#endif
 
 
 struct ThreadParam {
@@ -864,6 +874,7 @@ extern "C" void *__tsan_thread_start_func(void *arg) {
     ThreadState *thr = cur_thread();
     // Thread-local state is not initialized yet.
     ScopedIgnoreInterceptors ignore;
+#if !SANITIZER_MAC
     ThreadIgnoreBegin(thr, 0);
     if (pthread_setspecific(g_thread_finalize_key,
                             (void *)GetPthreadDestructorIterations())) {
@@ -871,6 +882,7 @@ extern "C" void *__tsan_thread_start_func(void *arg) {
       Die();
     }
     ThreadIgnoreEnd(thr, 0);
+#endif
     while ((tid = atomic_load(&p->tid, memory_order_acquire)) == 0)
       internal_sched_yield();
     ThreadStart(thr, tid, GetTid());
@@ -2651,10 +2663,12 @@ void InitializeInterceptors() {
     Die();
   }
 
+#if !SANITIZER_MAC
   if (pthread_key_create(&g_thread_finalize_key, &thread_finalize)) {
     Printf("ThreadSanitizer: failed to create thread key\n");
     Die();
   }
+#endif
 
   FdInit();
 }
